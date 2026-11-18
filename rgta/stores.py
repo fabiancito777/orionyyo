@@ -9,6 +9,7 @@ de la pagina con un bucle de 8 ms, asi no se pierde ni un round-trip.
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass, field
 
@@ -307,13 +308,45 @@ class StoreFlow:
         return result or {}
 
     def wait_result(self, timeout: float | None = None) -> dict:
-        ms = int((timeout if timeout is not None else self.cfg.submit_timeout) * 1000)
+        """Busca la respuesta del canje en TODOS los frames de checkout.
+
+        Al pulsar Continuar, PlayStation cambia el iframe de /voucher a
+        /unified/cart u otra URL, asi que quedarse en el contexto antiguo
+        hacia que la lectura expirara aunque la tienda ya hubiera respondido.
+        """
+        limit = timeout if timeout is not None else self.cfg.submit_timeout
+        deadline = time.perf_counter() + limit
         pattern = "|".join((SUCCESS_RE, ALREADY_RE, INVALID_RE, REGION_RE, RATE_RE))
-        result = self._eval(
-            "waitResult", pattern, ms,
-            await_promise=True, timeout=ms / 1000.0 + 5.0,
-        )
-        return result or {}
+        last_body = ""
+        last_url = ""
+        while time.perf_counter() < deadline:
+            try:
+                frames = self.tab.frames()
+            except Exception:  # noqa: BLE001
+                break
+            for frame in frames:
+                url = frame.get("url", "")
+                if "checkout.playstation.com" not in url:
+                    continue  # el store principal tiene texto que da falsos positivos
+                try:
+                    context_id = self.tab.frame_context_id(frame["id"])
+                    body = self.tab.eval_ctx(
+                        "(document.body.innerText||'').slice(0,2000)",
+                        context_id, timeout=2.0,
+                    ) or ""
+                except Exception:  # noqa: BLE001
+                    continue
+                if body:
+                    last_body = str(body)
+                match = re.search(pattern, last_body, re.IGNORECASE)
+                if match:
+                    return {"state": "result", "match": match.group(0), "body": last_body,
+                            "url": url}
+                if "/voucher" not in url:
+                    last_url = url
+                    return {"state": "navigated", "body": last_body, "url": url}
+            time.sleep(0.05)
+        return {"state": "timeout", "body": last_body, "url": last_url}
 
     def body(self) -> str:
         return str(self._eval("body", 2500) or "")
@@ -414,31 +447,45 @@ class PsFlow(StoreFlow):
         self.sel_confirm = cfg.ps_confirm
         super().__init__(cfg)
 
+    def _real_click_text(self, pattern: str) -> bool:
+        js = (
+            "(()=>{const re=new RegExp(%s,'i');"
+            "const b=[...document.querySelectorAll('button,a,[role=button]')]"
+            ".find(x=>re.test((x.innerText||'').trim()));"
+            "if(!b)return null;const r=b.getBoundingClientRect();"
+            "return {x:r.x+r.width/2,y:r.y+r.height/2};})()" % json.dumps(pattern)
+        )
+        pos = self.tab.eval(js)
+        if not pos:
+            return False
+        self.tab.click_at(pos["x"], pos["y"])
+        return True
+
     def ensure_ready(self, timeout: float = 4.0, allow_opener: bool = True) -> bool:
         if self.has_input():
             return True
-        if allow_opener:
-            # El menu de la cuenta y "Canjear codigo" viven en la pagina
-            # principal; el campo de 12 caracteres esta en el iframe.
+        for attempt in range(2):
+            if allow_opener:
+                try:
+                    self.tab.eval(JS_LIB)
+                    if self.tab.click_element("button.profile-icon"):
+                        time.sleep(0.6)
+                        self._real_click_text(r"^canjear c[oó]digo$")
+                except Exception:  # noqa: BLE001
+                    pass
+            deadline = time.time() + min(timeout, 2.5)
+            while time.time() < deadline:
+                if self.has_input():
+                    return True
+                time.sleep(0.2)
+            # El iframe puede quedarse en /unified/cart tras un canje: solo
+            # se recupera recargando la tienda y volviendo a abrir el menu.
             try:
-                self.tab.eval(JS_LIB)
-                self.tab.eval(
-                    "(()=>{const b=document.querySelector('button.profile-icon');"
-                    "if(b)b.click();return !!b;})()"
-                )
-                time.sleep(0.5)
-                self.tab.eval(
-                    r"(()=>{const b=[...document.querySelectorAll('button,li,a')]"
-                    r".find(x=>/canjear/i.test(x.innerText||''));if(b)b.click();return !!b;})()"
-                )
+                self.tab.navigate(self.cfg.ps_url)
+                time.sleep(3.0)
             except Exception:  # noqa: BLE001
                 pass
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            if self.has_input():
-                return True
-            time.sleep(0.2)
-        return False
+        return self.has_input()
 
 
 def make_flow(cfg, store: str) -> StoreFlow:

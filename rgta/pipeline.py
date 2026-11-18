@@ -145,16 +145,20 @@ class Submitter(threading.Thread):
         if self.flow is None:
             self._connect()
 
-        ordered = [job.code] + [v for v in job.variants if v != job.code][:2]
+        ordered = [job.code] + [v for v in job.variants if v != job.code][:1]
         for index, code in enumerate(ordered):
             result: Result = self.flow.submit(code)  # type: ignore[union-attr]
             shown = format_code(code, self.store)
             retry = " (variante)" if index else ""
+            extra = (f" | body={result.body[:220]!r}" if result.status != "success" and result.body else "")
             print(
                 f"[{self.store}] {shown}{retry} -> {result.status} "
-                f"total={result.timings.get('settle', 0):.0f}ms {result.detail}"
+                f"total={result.timings.get('settle', 0):.0f}ms {result.detail}{extra}"
             )
-            self.journal.add("canje", self.store, shown, result.status, result.detail, result.timings)
+            self.journal.add(
+                "canje", self.store, shown, result.status,
+                (result.detail + extra)[:400], result.timings,
+            )
             if result.status == "success":
                 _beep("success")
                 break

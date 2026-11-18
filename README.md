@@ -31,6 +31,8 @@ Para probar sin enviar nada: `python -m rgta run --no-submit`.
 | `python -m rgta grab --out logs/frame.png` | Guarda lo que está viendo el detector |
 | `python -m rgta tune --image logs/frame.png --show` | Cajas detectadas, OCR y códigos extraídos |
 | `python -m rgta probe` | Vuelca inputs/botones reales de las tiendas para ajustar heurísticas |
+| `python simulate.py --n 12` | Simulación: 12 frames sintéticos con overlay aleatorio; mide detección y latencia |
+| `python simulate.py --image frame.png` | Prueba el pipeline sobre una captura real guardada |
 | `python -m rgta run --no-submit` | Solo leer y registrar |
 | `python -m rgta run` | Lectura + canje |
 

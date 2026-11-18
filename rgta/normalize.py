@@ -78,9 +78,15 @@ def _scan(raw: str) -> tuple[str, list[bool]]:
 
 
 def _drop_prefixes(text: str, sep: list[bool], keep: int) -> tuple[str, list[bool]]:
+    """Quita 'Rubius CODIGO:' aunque el OCR lo haya leido todo en una linea."""
+    cut = 6 if text.startswith("RUBIUS") else 0
     for prefix in PREFIXES:
-        if text.startswith(prefix) and len(text) - len(prefix) >= keep:
-            return text[len(prefix) :], sep[len(prefix) :]
+        position = text.find(prefix, cut, cut + 14)
+        if position != -1:
+            cut = position + len(prefix)
+            break
+    if cut and len(text) - cut >= keep:
+        return text[cut:], sep[cut:]
     return text, sep
 
 

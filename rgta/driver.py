@@ -117,6 +117,33 @@ class Tab:
     def navigate(self, url: str, timeout: float = 10.0) -> None:
         self.call("Page.navigate", {"url": url}, timeout=timeout)
 
+    def click_at(self, x: float, y: float) -> None:
+        """Clic real de raton. Algunos menus de PlayStation ignoran el
+        click() de JavaScript y solo responden a eventos reales del navegador."""
+        for kind in ("mousePressed", "mouseReleased"):
+            self.call(
+                "Input.dispatchMouseEvent",
+                {
+                    "type": kind,
+                    "x": float(x),
+                    "y": float(y),
+                    "button": "left",
+                    "clickCount": 1,
+                },
+            )
+
+    def click_element(self, css: str) -> bool:
+        """Localiza un elemento por CSS y le hace un clic real en su centro."""
+        rect = self.eval(
+            f"(()=>{{const e=document.querySelector({json.dumps(css)});"
+            f"if(!e)return null;const r=e.getBoundingClientRect();"
+            f"return {{x:r.x+r.width/2,y:r.y+r.height/2}};}})()"
+        )
+        if not rect:
+            return False
+        self.click_at(rect["x"], rect["y"])
+        return True
+
     def press_escape(self) -> None:
         for kind in ("keyDown", "keyUp"):
             self.call(
@@ -135,6 +162,27 @@ class Tab:
         return str(value or "")
 
     # ------------------------------------------------------------------
+    def frames(self) -> list[dict]:
+        """Todos los frames de la pagina (id + url), incluidos cross-origin."""
+        tree = self.call("Page.getFrameTree", {}).get("frameTree", {})
+        frames: list[dict] = []
+
+        def walk(node: dict) -> None:
+            frames.append({"id": node.get("frame", {}).get("id"),
+                           "url": node.get("frame", {}).get("url", "")})
+            for child in node.get("childFrames", []):
+                walk(child)
+
+        walk(tree)
+        return frames
+
+    def frame_context_id(self, frame_id: str) -> int:
+        world = self.call(
+            "Page.createIsolatedWorld",
+            {"frameId": frame_id, "worldName": "rgta", "grantUniveralAccess": True},
+        )
+        return int(world["executionContextId"])
+
     def frame_context(self, url_hint: str) -> int | None:
         """Devuelve un executionContextId dentro de un iframe cross-origin.
 
@@ -142,23 +190,10 @@ class Tab:
         Page.getFrameTree. Con un mundo aislado se puede ejecutar JS dentro
         del frame y llegar al formulario.
         """
-        tree = self.call("Page.getFrameTree", {}).get("frameTree", {})
-        frames: list[dict] = []
-
-        def walk(node: dict) -> None:
-            frames.append(node.get("frame", {}))
-            for child in node.get("childFrames", []):
-                walk(child)
-
-        walk(tree)
-        matches = [f for f in frames if url_hint in (f.get("url") or "")]
+        matches = [f for f in self.frames() if url_hint in f["url"]]
         if not matches:
             return None
-        world = self.call(
-            "Page.createIsolatedWorld",
-            {"frameId": matches[0]["id"], "worldName": "rgta", "grantUniveralAccess": True},
-        )
-        return int(world["executionContextId"])
+        return self.frame_context_id(matches[0]["id"])
 
     def eval_ctx(self, expression: str, context_id: int, await_promise: bool = False,
                  timeout: float = 30.0):
