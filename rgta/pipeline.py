@@ -18,7 +18,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from . import detect, normalize
+from . import clipboard, detect, normalize
 from .capture import Grabber
 from .config import Config
 from .ocr import Reader
@@ -51,6 +51,8 @@ def _beep(kind: str) -> None:
             winsound.Beep(1900, 260)
         elif kind == "invalid":
             winsound.Beep(400, 140)
+        elif kind == "detect":
+            winsound.Beep(1150, 90)
     except Exception:  # noqa: BLE001
         pass
 
@@ -214,6 +216,14 @@ class Pipeline:
         self.stats = {"frames": 0, "ocr": 0, "boxes": 0, "hits": 0}
 
     # ------------------------------------------------------------------
+    def _notify_detection(self, code: str) -> None:
+        """Copiar y sonar en cuanto se lee, sin bloquear el bucle."""
+        try:
+            clipboard.set_text(code)
+        except Exception as exc:  # noqa: BLE001
+            print(f"    (portapapeles: {exc})")
+        threading.Thread(target=_beep, args=("detect",), daemon=True).start()
+
     def _load_seen(self) -> set[str]:
         try:
             return {
@@ -336,6 +346,7 @@ class Pipeline:
 
                 agreed = normalize.consensus([c.text for c in found], self.cfg.charset_hint)
                 best = next((c for c in found if c.text == agreed), found[0])
+                self._notify_detection(best.text)
                 if self.cfg.debug:
                     print(f"    lecturas={[c.text for c in found]} -> consenso={agreed}")
 

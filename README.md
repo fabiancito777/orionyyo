@@ -62,6 +62,8 @@ Para probar sin enviar nada: `python -m rgta run --no-submit`.
 4. **Normalización**: se quita el prefijo `CODIGO:`, se limpian guiones, se
    exigen exactamente 25 o 12 caracteres y se generan variantes con las
    confusiones típicas.
+4. **Al detectar un código se copia al portapapeles y suena un pitido** antes
+   de intentar el canje, para tenerlo aunque la tienda falle.
 5. **Canje**: `HTMLInputElement.value` nativo + eventos `input`/`change` (para
    que React lo vea), click en Siguiente/Continuar, y un bucle de 8 ms dentro
    de la página que pulsa el botón final en cuanto aparece.
