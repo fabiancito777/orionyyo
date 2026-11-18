@@ -277,6 +277,21 @@ class StoreFlow:
         payload = ", ".join(json.dumps(a) for a in args)
         return f"window.__rgta.{function}({payload})"
 
+    def _real_click_text(self, pattern: str, tab=None) -> bool:
+        target = tab or self.tab
+        js = (
+            "(()=>{const re=new RegExp(%s,'i');"
+            "const b=[...document.querySelectorAll('button,a,[role=button]')]"
+            ".find(x=>re.test((x.innerText||'').trim()));"
+            "if(!b)return null;const r=b.getBoundingClientRect();"
+            "return {x:r.x+r.width/2,y:r.y+r.height/2};})()" % json.dumps(pattern)
+        )
+        pos = target.eval(js)
+        if not pos:
+            return False
+        target.click_at(pos["x"], pos["y"])
+        return True
+
     def _context(self) -> int | None:
         if not self.frame_hint:
             return None
@@ -470,6 +485,66 @@ class XboxFlow(StoreFlow):
             main.close()
             return Tab(cfg.xbox_port, "redeemnow", timeout=6.0, kinds=self.tab_kinds)
 
+    def fill(self, code: str) -> dict:
+        """Xbox solo habilita SIGUIENTE con escritura real de teclado."""
+        try:
+            context_id = self._context()
+            position = self.tab.eval_ctx(
+                "(()=>{const e=document.querySelector('input');"
+                "if(!e)return null;const r=e.getBoundingClientRect();"
+                "return {x:r.x+r.width/2,y:r.y+r.height/2};})()", context_id,
+            )
+            offset = self.tab.eval(
+                "(()=>{const f=[...document.querySelectorAll('iframe')]"
+                ".find(x=>(x.src||'').includes('redeemnow'));"
+                "if(!f)return null;const r=f.getBoundingClientRect();"
+                "return {x:r.x,y:r.y};})()"
+            )
+            if position and offset:
+                self.tab.click_at(offset["x"] + position["x"], offset["y"] + position["y"])
+                for kind in ("keyDown", "keyUp"):
+                    self.tab.call("Input.dispatchKeyEvent", {
+                        "type": kind, "key": "a", "code": "KeyA",
+                        "windowsVirtualKeyCode": 65, "modifiers": 2,
+                    })
+                formatted = "-".join(code[i : i + 5] for i in range(0, len(code), 5))
+                self.tab.call("Input.insertText", {"text": formatted})
+                time.sleep(0.12)
+                value = self.tab.eval_ctx("document.querySelector('input').value", context_id)
+                return {"ok": True, "value": value}
+        except Exception:  # noqa: BLE001
+            pass
+        return super().fill(code)
+
+    def ensure_ready(self, timeout: float = 4.0, allow_opener: bool = True) -> bool:
+        if self.has_input():
+            return True
+        if not allow_opener:
+            return False
+        cfg = self.cfg
+        for attempt in range(2):
+            try:
+                main = Tab(cfg.xbox_port, cfg.xbox_url_hint, timeout=3.0)
+                # El enlace "CANJEAR AHORA" ignora click() de JS: clic real.
+                self._real_click_text(r"^canjear ahora$", tab=main)
+                for _ in range(int(timeout / 0.2)):
+                    if any("redeemnow" in f["url"] for f in main.frames()):
+                        break
+                    time.sleep(0.2)
+                main.close()
+                try:
+                    self.tab.close()
+                except Exception:  # noqa: BLE001
+                    pass
+                self.tab = Tab(cfg.xbox_port, "redeemnow", timeout=5.0, kinds=self.tab_kinds)
+                self.tab.eval(JS_LIB)
+                self._ctx_id = None
+                if self.has_input():
+                    return True
+            except Exception:  # noqa: BLE001
+                pass
+        return False
+
 
 class PsFlow(StoreFlow):
     name = "ps"
@@ -540,20 +615,6 @@ class PsFlow(StoreFlow):
         except Exception:  # noqa: BLE001
             pass
         return super().press_next(timeout)
-
-    def _real_click_text(self, pattern: str) -> bool:
-        js = (
-            "(()=>{const re=new RegExp(%s,'i');"
-            "const b=[...document.querySelectorAll('button,a,[role=button]')]"
-            ".find(x=>re.test((x.innerText||'').trim()));"
-            "if(!b)return null;const r=b.getBoundingClientRect();"
-            "return {x:r.x+r.width/2,y:r.y+r.height/2};})()" % json.dumps(pattern)
-        )
-        pos = self.tab.eval(js)
-        if not pos:
-            return False
-        self.tab.click_at(pos["x"], pos["y"])
-        return True
 
     def ensure_ready(self, timeout: float = 4.0, allow_opener: bool = True) -> bool:
         if self.has_input():
