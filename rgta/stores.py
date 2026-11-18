@@ -472,6 +472,17 @@ class PsFlow(StoreFlow):
         self.tab.click_at(offset["x"] + pos["x"], offset["y"] + pos["y"])
         return True
 
+    def submit(self, code: str) -> Result:
+        # Si el panel quedo con un mensaje de la respuesta anterior
+        # ("ya se uso"), wait_result lo veria de nuevo y clasificaria mal el
+        # codigo siguiente. Se cierra y se reabre para partir del form limpio.
+        try:
+            self.close_panel()
+            time.sleep(0.25)
+        except Exception:  # noqa: BLE001
+            pass
+        return super().submit(code)
+
     def press_next(self, timeout: float = 1.5) -> dict:
         # Un element.click() desde un mundo aislado no siempre dispara el
         # manejador de React. Enter real primero; si no cambia nada, clic
