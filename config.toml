@@ -10,8 +10,8 @@ monitor      = 1          # 1 = pantalla principal en mss
 
 # Zona de la pantalla que se vigila, en fracciones (0..1) del monitor.
 # Solo el lado derecho, que es donde cae el overlay del codigo.
-region_x0    = 0.45
-region_y0    = 0.28
+region_x0    = 0.0
+region_y0    = 0.0
 region_x1    = 1.0
 region_y1    = 1.0
 
