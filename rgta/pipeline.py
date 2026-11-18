@@ -307,7 +307,7 @@ class Pipeline:
                 # codigos distintos: se pierde tiempo en intentos fallidos.
                 now = time.time()
                 self.recent_codes = [
-                    item for item in self.recent_codes if now - item[2] < 3.0
+                    item for item in self.recent_codes if now - item[2] < 20.0
                 ]
                 if any(
                     store == best.store and normalize.hamming(code, best.text) <= 2

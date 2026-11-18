@@ -447,6 +447,48 @@ class PsFlow(StoreFlow):
         self.sel_confirm = cfg.ps_confirm
         super().__init__(cfg)
 
+    def _real_click_in_frame(self, pattern: str) -> bool:
+        """Clic real sobre un boton dentro del iframe, sumando el offset del
+        iframe en la pagina principal (CDP usa coordenadas del viewport)."""
+        context_id = self._context()
+        if context_id is None:
+            return False
+        js = (
+            "(()=>{const re=new RegExp(%s,'i');"
+            "const b=[...document.querySelectorAll('button')]"
+            ".find(x=>re.test((x.innerText||'').trim()));"
+            "if(!b)return null;const r=b.getBoundingClientRect();"
+            "return {x:r.x+r.width/2,y:r.y+r.height/2};})()" % json.dumps(pattern)
+        )
+        pos = self.tab.eval_ctx(js, context_id)
+        offset = self.tab.eval(
+            "(()=>{const f=[...document.querySelectorAll('iframe')]"
+            ".find(x=>(x.src||'').includes('voucher'));"
+            "if(!f)return null;const r=f.getBoundingClientRect();"
+            "return {x:r.x,y:r.y};})()"
+        )
+        if not pos or not offset:
+            return False
+        self.tab.click_at(offset["x"] + pos["x"], offset["y"] + pos["y"])
+        return True
+
+    def press_next(self, timeout: float = 1.5) -> dict:
+        # Un element.click() desde un mundo aislado no siempre dispara el
+        # manejador de React. Enter real primero; si no cambia nada, clic
+        # real con coordenadas absolutas.
+        before = self.body()
+        try:
+            self.tab.press_enter()
+            time.sleep(0.4)
+            if self.body() != before:
+                return {"ok": True, "label": "Enter"}
+            if self._real_click_in_frame(self.next_re):
+                time.sleep(0.3)
+                return {"ok": True, "label": "click-real"}
+        except Exception:  # noqa: BLE001
+            pass
+        return super().press_next(timeout)
+
     def _real_click_text(self, pattern: str) -> bool:
         js = (
             "(()=>{const re=new RegExp(%s,'i');"

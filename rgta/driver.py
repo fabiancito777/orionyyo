@@ -132,6 +132,19 @@ class Tab:
                 },
             )
 
+    def press_enter(self) -> None:
+        """Enter real. Los formularios de PS responden mejor a eventos de
+        teclado del navegador que a element.click() desde JS."""
+        key = {
+            "key": "Enter",
+            "code": "Enter",
+            "windowsVirtualKeyCode": 13,
+            "nativeVirtualKeyCode": 13,
+        }
+        self.call("Input.dispatchKeyEvent", dict(key, type="keyDown", text="\r", unmodifiedText="\r"))
+        self.call("Input.dispatchKeyEvent", {"type": "char", "text": "\r"})
+        self.call("Input.dispatchKeyEvent", dict(key, type="keyUp"))
+
     def click_element(self, css: str) -> bool:
         """Localiza un elemento por CSS y le hace un clic real en su centro."""
         rect = self.eval(
