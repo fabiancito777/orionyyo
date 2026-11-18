@@ -16,7 +16,25 @@ from .driver import CDPError, Tab
 
 JS_LIB = r"""
 (() => {
-  if (window.__rgta && window.__rgta.version === 3) return 'ready';
+  if (window.__rgta && window.__rgta.version === 4) return 'ready';
+  // Lo que ya estaba en pantalla (etiquetas, "introduce un codigo", el error
+  // del intento anterior...) no cuenta como resultado. Un texto es nuevo si
+  // aparece mas veces que el minimo visto desde la referencia: asi un error
+  // que se borra y vuelve a salir (reintento con otra variante) si cuenta.
+  const count = (s, t) => s.split(t).length - 1;
+  const tracker = (start, re) => {
+    const floor = new Map();
+    for (const m of start.matchAll(re)) {
+      if (m[0] && !floor.has(m[0])) floor.set(m[0], count(start, m[0]));
+    }
+    return body => {
+      for (const [t, n] of floor) { const c = count(body, t); if (c < n) floor.set(t, c); }
+      for (const m of body.matchAll(re)) {
+        if (m[0] && count(body, m[0]) > (floor.get(m[0]) || 0)) return m[0];
+      }
+      return null;
+    };
+  };
   const vis = el => {
     if (!el || !el.getBoundingClientRect) return false;
     const r = el.getBoundingClientRect();
@@ -66,11 +84,12 @@ JS_LIB = r"""
     return el.value;
   };
   window.__rgta = {
-    version: 3, vis, txt, findInput, findClick,
+    version: 4, vis, txt, findInput, findClick, baseline: null,
     hasInput(sel, reSrc) { return !!findInput(sel, reSrc); },
     fill(sel, reSrc, value) {
       const el = findInput(sel, reSrc);
       if (!el) return { ok: false, reason: 'sin-campo' };
+      window.__rgta.baseline = document.body.innerText || '';
       const got = setValue(el, value);
       return { ok: true, value: got, placeholder: el.placeholder || '' };
     },
@@ -108,26 +127,45 @@ JS_LIB = r"""
         }, 8);
       });
     },
-    settle(sel, reSrc, resultReSrc, ms) {
+    settle(sel, reSrc, resultReSrc, failReSrc, ms) {
       return new Promise(resolve => {
-        const before = document.body.innerText || '';
-        const resultRe = resultReSrc ? new RegExp(resultReSrc, 'i') : null;
+        const base = window.__rgta.baseline;
+        const start = base != null ? base : (document.body.innerText || '');
+        const resultRe = resultReSrc ? new RegExp(resultReSrc, 'gi') : null;
+        const failRe = failReSrc ? new RegExp(failReSrc, 'gi') : null;
+        const none = () => null;
+        let failNew = failRe ? tracker(start, failRe) : none;
+        let okNew = none;
         const t0 = Date.now();
         let clicked = false;
+        const done = (match, body) => {
+          clearInterval(id);
+          resolve({ state: 'result', match: match, body: body.slice(0, 2000) });
+        };
         const id = setInterval(() => {
           try {
             const body = document.body.innerText || '';
-            if (clicked && resultRe) {
-              const m = body.match(resultRe);
-              if (m && !before.includes(m[0])) {
-                clearInterval(id);
-                resolve({ state: 'result', match: m[0], body: body.slice(0, 2000) });
-                return;
-              }
-            }
             if (!clicked) {
+              // El boton de confirmar manda: si esta, se pulsa siempre. Un
+              // error solo cuenta mientras NO hay boton (Xbox rechazo el
+              // codigo tras "Siguiente").
               const el = findClick(sel, reSrc, true);
-              if (el) { clicked = true; el.click(); }
+              if (el) {
+                clicked = true;
+                // El texto de la pantalla de confirmar es la nueva referencia.
+                if (failRe) failNew = tracker(body, failRe);
+                if (resultRe) okNew = tracker(body, resultRe);
+                el.click();
+              } else {
+                const fail = failNew(body);
+                if (fail) { done(fail, body); return; }
+              }
+            } else {
+              // El error va antes que el exito: "already redeemed" contiene "redeemed".
+              const fail = failNew(body);
+              if (fail) { done(fail, body); return; }
+              const ok = okNew(body);
+              if (ok) { done(ok, body); return; }
             }
             if (Date.now() - t0 > ms) {
               clearInterval(id);
@@ -300,8 +338,11 @@ class StoreFlow:
 
     def settle(self, timeout: float | None = None) -> dict:
         ms = int((timeout if timeout is not None else self.cfg.submit_timeout) * 1000)
+        # REGION_RE no entra: "pais/region" aparece en pantallas normales
+        # (pie de pagina, ficha del producto) y cortaria un canje valido.
+        fail_re = "|".join((ALREADY_RE, INVALID_RE, RATE_RE))
         result = self._eval(
-            "settle", self.sel_confirm, self.confirm_re, SUCCESS_RE, ms,
+            "settle", self.sel_confirm, self.confirm_re, SUCCESS_RE, fail_re, ms,
             await_promise=True, timeout=ms / 1000.0 + 5.0,
         )
         return result or {}

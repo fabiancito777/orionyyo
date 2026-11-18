@@ -142,11 +142,15 @@ class Reader:
         yield "otsu_inv", cv2.bitwise_not(otsu)
 
     def read(self, crop: np.ndarray, is_valid=None, max_tries: int = 2,
-             all_variants: bool = False) -> list[Read]:
+             all_variants: bool = False, skip=frozenset()) -> list[Read]:
+        """max_tries cuenta preparaciones desde la primera, incluidas las
+        de skip (que ya se leyeron antes y no se vuelven a pasar al OCR)."""
         reads: list[Read] = []
         for index, (name, image) in enumerate(self._variants(crop)):
             if index >= max_tries:
                 break
+            if name in skip:
+                continue
             try:
                 if isinstance(self.backend, WinRtBackend):
                     text, score = self.backend.read(image), 1.0

@@ -16,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 
 import cv2
+import numpy as np
 
 from . import detect, normalize
 from .capture import Grabber
@@ -27,6 +28,18 @@ from .stores import Result, make_flow
 def format_code(code: str, store: str) -> str:
     size = 5 if store == "xbox" else 4
     return "-".join(code[i : i + size] for i in range(0, len(code), size))
+
+
+def _signature(crop: np.ndarray) -> np.ndarray:
+    """Miniatura en gris del recorte para saber si su contenido cambio."""
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if crop.ndim == 3 else crop
+    return cv2.resize(gray, (48, 12), interpolation=cv2.INTER_AREA)
+
+
+def _same_content(a: np.ndarray, b: np.ndarray, tolerance: float = 6.0) -> bool:
+    # La compresion del video mueve unos pocos niveles de gris aunque el
+    # texto no cambie; un texto nuevo o un fundido mueve muchos mas.
+    return float(cv2.absdiff(a, b).mean()) < tolerance
 
 
 def _beep(kind: str) -> None:
@@ -192,25 +205,31 @@ class Pipeline:
         self.stats = {"frames": 0, "ocr": 0, "boxes": 0, "hits": 0}
 
     # ------------------------------------------------------------------
-    def _skip(self, box: detect.Box) -> bool:
+    def _skip(self, box: detect.Box, sig: np.ndarray) -> bool:
         now = time.time()
         retry = self.cfg.retry_after_ms / 1000.0
-        kept: list[tuple[detect.Box, float, bool]] = []
+        kept: list[tuple[detect.Box, float, bool, np.ndarray]] = []
         skipped = False
-        for old, stamp, ok in self.recent:
+        for old, stamp, ok, old_sig in self.recent:
             # una caja de la que ya sacamos codigo se relee cada 1.5 s por
             # si la lectura anterior tenia un caracter mal; una que no dio
-            # nada se reintenta antes.
+            # nada se reintenta tras retry_after_ms, salvo que su contenido
+            # cambie antes (p. ej. el overlay apareciendo con un fundido).
             hold = 1.5 if ok else retry
             if now - stamp < hold:
-                kept.append((old, stamp, ok))
-                if detect.iou(box, old) > 0.4 and ok:
+                kept.append((old, stamp, ok, old_sig))
+                if skipped:
+                    continue
+                if ok:
+                    if detect.iou(box, old) > 0.4:
+                        skipped = True
+                elif detect.iou(box, old) > 0.6 and _same_content(sig, old_sig):
                     skipped = True
         self.recent = kept
         return skipped
 
-    def _mark(self, box: detect.Box, ok: bool) -> None:
-        self.recent.append((box, time.time(), ok))
+    def _mark(self, box: detect.Box, ok: bool, sig: np.ndarray) -> None:
+        self.recent.append((box, time.time(), ok, sig))
 
     # ------------------------------------------------------------------
     def start(self) -> None:
@@ -256,13 +275,14 @@ class Pipeline:
             self.stats["boxes"] += len(boxes)
 
             for box in boxes:
-                if self._skip(box):
-                    continue
                 crop = detect.crop(frame, box)
+                sig = _signature(crop)
+                if self._skip(box, sig):
+                    continue
                 is_valid = lambda text: normalize.looks_like_code(text, self.cfg)  # noqa: E731
                 reads = self.reader.read(crop, is_valid=is_valid, max_tries=2)
                 if not reads:
-                    self._mark(box, False)
+                    self._mark(box, False, sig)
                     continue
                 self.stats["ocr"] += 1
 
@@ -278,16 +298,18 @@ class Pipeline:
                 if found:
                     # Vale la pena pagar 2 lecturas mas: con 3-4 lecturas del
                     # mismo recorte se vota caracter a caracter y se corrigen
-                    # O/Q, J/5, 0/O antes de enviar nada.
+                    # O/Q, J/5, 0/O antes de enviar nada. Solo se leen las
+                    # preparaciones que faltan: las primeras ya estan en reads.
                     extra = self.reader.read(
-                        crop, is_valid=is_valid, max_tries=4, all_variants=True
+                        crop, max_tries=4, all_variants=True,
+                        skip={r.variant for r in reads},
                     )
                     if extra:
-                        reads = extra
+                        reads = reads + extra
                         found = candidate_list(reads)
 
                 if not found:
-                    self._mark(box, False)
+                    self._mark(box, False, sig)
                     continue
 
                 agreed = normalize.consensus([c.text for c in found], self.cfg.charset_hint)
@@ -296,7 +318,7 @@ class Pipeline:
                     print(f"    lecturas={[c.text for c in found]} -> consenso={agreed}")
 
                 if best.text in self.enqueued:
-                    self._mark(box, True)
+                    self._mark(box, True, sig)
                     continue
                 # Varias cajas del MISMO overlay pueden dar codigos que
                 # difieren en 1-2 caracteres. No los envies como si fueran
@@ -309,7 +331,7 @@ class Pipeline:
                     store == best.store and normalize.hamming(code, best.text) <= 2
                     for store, code, _ in self.recent_codes
                 ):
-                    self._mark(box, True)
+                    self._mark(box, True, sig)
                     continue
 
                 self.enqueued.add(best.text)
@@ -328,7 +350,7 @@ class Pipeline:
                         normalize.variants(best.text, self.cfg.charset_hint, self.cfg.max_variants),
                         time.time())
                 )
-                self._mark(box, True)
+                self._mark(box, True, sig)
 
             if self.cfg.debug and self.last_frame is not None:
                 preview = detect.draw(self.last_frame, boxes)

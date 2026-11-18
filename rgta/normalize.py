@@ -85,7 +85,7 @@ def _drop_prefixes(text: str, sep: list[bool], keep: int) -> tuple[str, list[boo
 
 
 def _best_window(
-    text: str, sep: list[bool], length: int, group: int, hint: str
+    text: str, sep: list[bool], length: int, group: int, hint: str, min_mix: int = 0
 ) -> tuple[str, float] | None:
     if len(text) < length:
         return None
@@ -104,7 +104,11 @@ def _best_window(
             continue
         digits = sum(1 for c in window if c.isdigit())
         letters = length - digits
-        if digits < 3 or letters < 3:
+        # min_mix: minimo de digitos y de letras. Con 3, si los caracteres
+        # de un codigo PS fueran al azar, se perderia ~31 % (12 caracteres a
+        # menudo traen 0-2 digitos). Los guiones obligatorios ya filtran
+        # las frases; a cambio, un 4-4-4 todo letras ahora pasa como PS.
+        if digits < min_mix or letters < min_mix:
             continue
         hint_ratio = sum(1 for c in window if c in hint) / float(length)
         score = hits * 2.5 + hint_ratio * 3.0
@@ -130,11 +134,11 @@ def find_codes(raw: str, cfg) -> list[Code]:
     text, sep = _drop_prefixes(text, sep, cfg.ps_len)
 
     found: list[Code] = []
-    for length, group, store in (
-        (cfg.xbox_len, 5, "xbox"),
-        (cfg.ps_len, 4, "ps"),
+    for length, group, store, min_mix in (
+        (cfg.xbox_len, 5, "xbox", 1),  # 25 caracteres sin mezcla: ~0.03 %
+        (cfg.ps_len, 4, "ps", 0),
     ):
-        hit = _best_window(text, sep, length, group, cfg.charset_hint)
+        hit = _best_window(text, sep, length, group, cfg.charset_hint, min_mix)
         if hit is None:
             continue
         code, score = hit
