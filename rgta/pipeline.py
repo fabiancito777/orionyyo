@@ -201,7 +201,12 @@ class Pipeline:
         self.submitters = {
             store: Submitter(cfg, store, submit, self.journal) for store in ("xbox", "ps")
         }
-        self.enqueued: set[str] = set()
+        # Los codigos ya vistos sobreviven a los reinicios del proceso: el
+        # directo a veces vuelve a mostrar un codigo gastado y no tiene
+        # sentido volver a enviarlo (ademas de arriesgar rate-limits).
+        self.seen_path = Path(cfg.log_dir) / "codigos_vistos.txt"
+        self.seen_path.parent.mkdir(parents=True, exist_ok=True)
+        self.enqueued: set[str] = self._load_seen()
         self.recent_codes: list[tuple[str, str, float]] = []
         self.recent: list[tuple[detect.Box, float, bool]] = []
         self.stop_event = threading.Event()
@@ -209,6 +214,19 @@ class Pipeline:
         self.stats = {"frames": 0, "ocr": 0, "boxes": 0, "hits": 0}
 
     # ------------------------------------------------------------------
+    def _load_seen(self) -> set[str]:
+        try:
+            return {
+                line.strip() for line in self.seen_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            }
+        except FileNotFoundError:
+            return set()
+
+    def _remember(self, code: str) -> None:
+        with self.seen_path.open("a", encoding="utf-8") as handle:
+            handle.write(code + "\n")
+
     def _skip(self, box: detect.Box, sig: np.ndarray) -> bool:
         now = time.time()
         retry = self.cfg.retry_after_ms / 1000.0
@@ -339,6 +357,7 @@ class Pipeline:
                     continue
 
                 self.enqueued.add(best.text)
+                self._remember(best.text)
                 self.recent_codes.append((best.store, best.text, now))
                 self.stats["hits"] += 1
                 latency = (time.perf_counter() - started) * 1000
