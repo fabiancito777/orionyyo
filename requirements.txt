@@ -1,0 +1,10 @@
+numpy>=1.26
+opencv-python>=4.9
+mss>=9.0
+websocket-client>=1.7
+winsdk>=1.0.0b10
+keyboard>=0.13.5
+
+# Opcionales:
+# dxcam>=0.3.2          # captura por DXGI, un poco mas rapida que mss
+# rapidocr-onnxruntime  # OCR alternativo si Windows OCR no funciona

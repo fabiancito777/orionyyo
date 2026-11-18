@@ -1,0 +1,18 @@
+# Sesiones de los navegadores (contienen cookies/tokens)
+profiles/
+
+# Capturas, codigos detectados y pruebas
+logs/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Editores / OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini

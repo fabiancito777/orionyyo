@@ -1,0 +1,66 @@
+# ============================================================
+#  rgta - lector de codigos en directo + canje automatico
+#  Edita y vuelve a lanzar. Todos los valores son opcionales.
+# ============================================================
+
+# ---------- captura -----------------------------------------
+# auto = dxcam si esta disponible, si no mss
+backend      = "auto"
+monitor      = 1          # 1 = pantalla principal en mss
+
+# Zona de la pantalla que se vigila, en fracciones (0..1) del monitor.
+# Solo el lado derecho, que es donde cae el overlay del codigo.
+region_x0    = 0.45
+region_y0    = 0.28
+region_x1    = 1.0
+region_y1    = 1.0
+
+fps          = 30.0       # frames de vigilancia por segundo
+
+# ---------- deteccion ---------------------------------------
+detect_scale    = 0.5     # se detecta a media resolucion, se lee a resolucion completa
+min_text_h      = 8       # altura minima de la linea de texto (px reales)
+max_text_h      = 150     # altura maxima (por si agranda el overlay)
+min_aspect      = 2.5     # 12 caracteres ~3.5:1, 25 caracteres ~6.5:1 o mas (fuente ancha)
+max_aspect      = 45.0
+detect_threshold = 0      # 0 = Otsu automatico
+max_boxes       = 4
+
+# ---------- ocr ---------------------------------------------
+ocr_backend     = "auto"   # auto | winrt | rapid
+ocr_target_h    = 44       # altura a la que se reescala el recorte antes de leer
+ocr_max_side    = 1000     # limite del motor de Windows
+min_score       = 0.35     # solo para rapidocr
+
+# ---------- validacion --------------------------------------
+xbox_len        = 25
+ps_len          = 12
+# Solo se usa para DESEMPATAR caracteres confundidos (0/O, 1/I...).
+# Nunca se descarta un codigo por tener un caracter fuera de este juego.
+charset_hint    = "23456789BCDFGHJKMPQRTVWXY"
+max_variants    = 6
+retry_after_ms  = 400      # si una caja no dio codigo valido, reintentar tras este tiempo
+
+# ---------- navegadores (puertos de depuracion) -------------
+stream_port     = 9222
+xbox_port       = 9223
+ps_port         = 9224
+xbox_url_hint   = "xbox.com"
+ps_url_hint     = "store.playstation.com"
+
+# Selectores CSS opcionales. Vacio = heuristica por texto.
+xbox_input      = ""
+xbox_next       = ""
+xbox_confirm    = ""
+ps_input        = ""
+ps_next         = ""
+ps_confirm      = ""
+
+xbox_url        = "https://www.xbox.com/es-CO/redeem"
+ps_url          = "https://store.playstation.com/es-co/pages/latest"
+
+submit_timeout  = 8.0      # segundos maximos esperando el resultado del canje
+
+# ---------- varios ------------------------------------------
+log_dir         = "logs"
+debug           = false
